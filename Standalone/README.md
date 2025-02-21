@@ -14,6 +14,18 @@ pip install easydict h5py matplotlib numpy scikit-learn timm pykeops
 pip install 'pyvista[all,trame]' jupyterlab
 ```
 
+After running these commands, you will have to compile the C++ extension modules by running these commands:
+
+```bash
+cd KPConvX/cpp_wrappers/cpp_neighbors
+python setup.py build_ext --inplace
+cd ../cpp_subsampling
+python setup.py build_ext --inplace
+```
+
+Note that there might still be issues during the process. For example, the calls to ```python setup.py``` above might give an error about there not being a module named ```distutils.msvccompiler```. In this case, check what is the last file in the traceback, open it, and comment out the import which causes the error (which should be ```from distutils.msvccompiler import get_build_version as get_build_msvc_version```).
+
+Also, when running the training scripts, you might get errors about the linker not finding -lnvrtc. In this case, follow the steps commented in [this GitHub issue](https://github.com/getkeops/keops/issues/318#issuecomment-2361423739) 
 
 ## Prepare data
 
