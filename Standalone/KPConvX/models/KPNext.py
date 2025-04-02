@@ -230,6 +230,7 @@ class KPNeXt(nn.Module):
             
         elif cfg.data.task == 'cloud_segmentation':
             if len(cfg.train.class_w) > 0:
+                print(f"Training with weights: {cfg.train.class_w}")
                 class_w = torch.from_numpy(np.array(cfg.train.class_w, dtype=np.float32))
                 self.criterion = CrossEntropy(weight=class_w, ignore_index=-1)
             else:
