@@ -205,7 +205,7 @@ class SceneSegDataset(Dataset):
         raise NotImplementedError()
         return
 
-    def load_scenes_in_memory(self, label_property='label', f_properties=[], f_scales=[], save_cache=True):
+    def load_scenes_in_memory(self, label_property='label', f_properties=[], f_scales=[], save_cache=True, reproj_tile_size=10.0):
 
         # Parameter
         dl = self.cfg.data.init_sub_size
@@ -267,6 +267,7 @@ class SceneSegDataset(Dataset):
 
                 # Read file (custom user function)
                 points, features, labels = self.load_scene_file(file_path)
+                points = points.astype(np.float32)
 
                 # Subsample cloud (optional)
                 if dl > 0:
@@ -377,7 +378,7 @@ class SceneSegDataset(Dataset):
                     q_pts = torch.from_numpy(points).to(device).type(torch.float32)
 
                     # Compute nearest neighbors per tiles
-                    _, idxs = tiled_knn(q_pts, s_pts, k=1, tile_size=3.5, margin=2 * dl)
+                    _, idxs = tiled_knn(q_pts, s_pts, k=1, tile_size=reproj_tile_size, margin=2 * dl)
                     proj_inds = np.squeeze(idxs.cpu().numpy()).astype(np.int32)
 
                     # Save
@@ -1192,10 +1193,10 @@ class SceneSegSampler(Sampler):
             self.N = dataset.cfg.test.max_steps_per_epoch
 
         # Only perform validation for a portion of the validation test at each epoch
-        if dataset.set =='validation' and dataset.data_sampler == 'regular':
-            reg_sampling_N = int(dataset.reg_sample_pts.shape[0])
-            self.N = min(self.N, int(np.ceil(reg_sampling_N * 0.67)))
-            self.N = max(self.N, int(np.ceil(reg_sampling_N * 0.34)))
+        #if dataset.set =='validation' and dataset.data_sampler == 'regular':
+            #reg_sampling_N = int(dataset.reg_sample_pts.shape[0])
+            #self.N = min(self.N, int(np.ceil(reg_sampling_N * 0.67)))
+            #self.N = max(self.N, int(np.ceil(reg_sampling_N * 0.34)))
 
         return
 
