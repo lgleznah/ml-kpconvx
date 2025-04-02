@@ -60,6 +60,13 @@ def train_and_validate(net, training_loader, val_loader, cfg, chkp_path=None, fi
     # Epochs and steps
     epoch = 0
 
+    # Loss history
+    train_losses = []
+    val_losses = []
+    
+    # Best mIoU value, for checkpointing
+    best_mIoU = 0
+
     # Choose to train on CPU or GPU
     if on_gpu and torch.cuda.is_available():
         device = init_gpu()
@@ -122,13 +129,20 @@ def train_and_validate(net, training_loader, val_loader, cfg, chkp_path=None, fi
             print("Model restored and ready for finetuning.")
 
         else:
-            # load everything otherwise
-            checkpoint = torch.load(chkp_path)
-            net.load_state_dict(checkpoint['model_state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            epoch = checkpoint['epoch']
-            net.train()
-            print("Model and training state restored.")
+            try:
+                # load everything otherwise
+                checkpoint = torch.load(chkp_path, weights_only=False)
+                net.load_state_dict(checkpoint['model_state_dict'])
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                epoch = checkpoint['epoch']
+                best_mIoU = checkpoint['best_mIoU']
+                train_losses = checkpoint['train_losses']
+                val_losses = [loss.item() for loss in checkpoint['val_losses']]
+                net.train()
+                print(f"Model and training state restored. Resuming training from epoch {epoch}")
+            
+            except FileNotFoundError:
+                print("Model and training state not found! Assuming new run and beginning training from scratch.")
 
 
     ############################
@@ -167,7 +181,7 @@ def train_and_validate(net, training_loader, val_loader, cfg, chkp_path=None, fi
     t0 = time.time()
 
     # Start global loop
-    for epoch in range(cfg.train.max_epoch):
+    for epoch in range(epoch, cfg.train.max_epoch):
 
         # Perform one epoch of training
         finished_epoch = False
@@ -176,7 +190,8 @@ def train_and_validate(net, training_loader, val_loader, cfg, chkp_path=None, fi
             epoch_tries += 1
             if epoch_tries > 5:
                 raise ValueError('The network is too big for this GPU. Try changing parameters.')
-            finished_epoch = training_epoch(epoch, t0, net, optimizer, training_loader, cfg, PID_file, device)
+            train_loss = training_epoch(epoch, t0, net, optimizer, training_loader, cfg, PID_file, device)
+            finished_epoch = train_loss is not None
             torch.cuda.empty_cache()
 
             # Try to free some memory again
@@ -200,27 +215,45 @@ def train_and_validate(net, training_loader, val_loader, cfg, chkp_path=None, fi
         # Update epoch
         epoch += 1
 
-        # Saving
-        if cfg.exp.saving:
-            # Get current state dict
-            save_dict = {'epoch': epoch,
-                         'model_state_dict': net.state_dict(),
-                         'optimizer_state_dict': optimizer.state_dict(),
-                         'saving_path': cfg.exp.log_dir}
-
-            # Save current state of the network (for restoring purposes)
-            checkpoint_path = join(checkpoint_directory, 'current_chkp.tar')
-            torch.save(save_dict, checkpoint_path)
-
-            # Save checkpoints occasionally
-            if (epoch + 1) % cfg.train.checkpoint_gap == 0:
-                checkpoint_path = join(checkpoint_directory, 'chkp_{:04d}.tar'.format(epoch + 1))
-                torch.save(save_dict, checkpoint_path)
-
         # Validation
         net.eval()
         with torch.no_grad():
-            validation_epoch(epoch, net, val_loader, cfg, val_data, device)
+            mIoU, val_loss = validation_epoch(epoch, net, val_loader, cfg, val_data, device)
+            train_losses.append(train_loss)
+            val_losses.append(val_loss)
+
+            if cfg.exp.saving and mIoU > best_mIoU:
+                best_mIoU = mIoU
+                # Get current state dict
+                save_dict = {'epoch': epoch,
+                            'model_state_dict': net.state_dict(),
+                            'optimizer_state_dict': optimizer.state_dict(),
+                            'saving_path': cfg.exp.log_dir}
+
+                # Save current state of the network (for restoring purposes)
+                checkpoint_path = join(checkpoint_directory, 'best_chkp.tar')
+                torch.save(save_dict, checkpoint_path)
+
+            # Saving
+            if cfg.exp.saving:
+                # Get current state dict
+                save_dict = {'epoch': epoch,
+                            'model_state_dict': net.state_dict(),
+                            'optimizer_state_dict': optimizer.state_dict(),
+                            'saving_path': cfg.exp.log_dir,
+                            'best_mIoU': best_mIoU,
+                            'train_losses': train_losses,
+                            'val_losses': val_losses}
+
+                # Save current state of the network (for restoring purposes)
+                checkpoint_path = join(checkpoint_directory, 'current_chkp.tar')
+                torch.save(save_dict, checkpoint_path)
+
+                # Save checkpoints occasionally
+                if (epoch + 1) % cfg.train.checkpoint_gap == 0:
+                    checkpoint_path = join(checkpoint_directory, 'chkp_{:04d}.tar'.format(epoch + 1))
+                    torch.save(save_dict, checkpoint_path)
+
         net.train()
 
 
@@ -229,6 +262,20 @@ def train_and_validate(net, training_loader, val_loader, cfg, chkp_path=None, fi
     # Remove the temporary file used for kill signal
     if exists(PID_file):
         remove(PID_file)
+
+    # Plot loss history
+    if cfg.exp.saving:
+        fig, ax = plt.subplots()
+        x_epochs = np.arange(cfg.train.max_epoch)
+        ax.plot(x_epochs, train_losses, label='Train loss')
+        ax.plot(x_epochs, val_losses, label='Val loss')
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('Loss')
+        ax.set_xticks(np.linspace(0, cfg.train.max_epoch - 1, num=11))
+        ax.set_ylim(bottom=0)
+        ax.set_title('Loss evolution')
+        ax.legend()
+        fig.savefig(join(cfg.exp.log_dir, 'training_plot.png'))
 
     print('Finished Training')
     return
