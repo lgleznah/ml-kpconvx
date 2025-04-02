@@ -50,7 +50,7 @@ def validation_epoch(epoch, net, val_loader, cfg, val_data, device):
         object_segmentation_validation(epoch, net, val_loader, cfg, val_data, device)
 
     elif cfg.data.task == 'cloud_segmentation':
-        cloud_segmentation_validation(epoch, net, val_loader, cfg, val_data, device)
+        return cloud_segmentation_validation(epoch, net, val_loader, cfg, val_data, device)
 
     elif cfg.data.task == 'slam_segmentation':
         slam_segmentation_validation(epoch, net, val_loader, cfg, val_data, device)
@@ -122,7 +122,7 @@ def cloud_segmentation_validation(epoch, net, val_loader, cfg, val_data, device,
     t = [time.time()]
     last_display = time.time()
     mean_dt = np.zeros(1)
-
+    mean_loss = 0
 
     t1 = time.time()
 
@@ -149,10 +149,18 @@ def cloud_segmentation_validation(epoch, net, val_loader, cfg, val_data, device,
 
         # Forward pass
         outputs = net(batch)
+
+        # Compute loss
+        if 'lam' in batch.in_dict and len(batch.in_dict.lam) > 0:
+            loss = net.loss_rsmix(outputs, batch.in_dict.labels, batch.in_dict.labels_b, batch.in_dict.lam)
+        else:
+            loss = net.loss(outputs, batch.in_dict.labels)
         
         if 'cuda' in device.type:
             torch.cuda.synchronize(device)
         t += [time.time()]
+
+        mean_loss += loss.item()
 
         # Get probs and labels
         stacked_probs = softmax(outputs).cpu().detach().numpy()
@@ -228,6 +236,7 @@ def cloud_segmentation_validation(epoch, net, val_loader, cfg, val_data, device,
                                  1000 * mean_dt[2],
                                  1000 * mean_dt[3]))
 
+    mean_loss /= (step+1)
     t2 = time.time()
 
     # Confusions for our subparts of validation set
@@ -244,6 +253,9 @@ def cloud_segmentation_validation(epoch, net, val_loader, cfg, val_data, device,
 
     # Balance with real validation proportions
     sum_Confs *= np.expand_dims(val_data.proportions / (np.sum(sum_Confs, axis=1) + 1e-6), 1)
+
+    print(sum_Confs.astype(np.int32))
+
 
     t4 = time.time()
 
@@ -377,7 +389,7 @@ def cloud_segmentation_validation(epoch, net, val_loader, cfg, val_data, device,
         print('Save2 ..... {:.1f}s'.format(t7 - t6))
         print('\n************************\n')
 
-    return
+    return mIoU, mean_loss
 
 
 def object_classification_validation(epoch, net, val_loader, cfg, val_data, device, debug=False):
