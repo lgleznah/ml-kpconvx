@@ -199,6 +199,23 @@ class SceneSegDataset(Dataset):
         self.augmentation_transform = ComposeAugment(self.full_augments)
 
         return
+    
+    def set_class_weights(self, cfg, chosen_set):
+        if chosen_set == 'training' and cfg.data.compute_class_weights:
+            file_labels = []
+            for file in self.scene_files:
+                _, _, labels = self.load_scene_file(file)
+                file_labels.append(labels)
+            
+            all_labels = np.concatenate(file_labels).flatten()
+            num_samples = len(all_labels)
+            weights = []
+            for label in np.unique(all_labels):
+                num_samples_label = len(all_labels[all_labels == label])
+                weights.append(num_samples / (num_samples_label * cfg.data.num_classes))
+
+            cfg.train.class_w = weights
+
 
     def load_scene_file(self, file_path):
         # Implement this function in child class, specific to each dataset
