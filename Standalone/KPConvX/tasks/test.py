@@ -129,13 +129,14 @@ def test_model(net, test_loader, cfg, on_gpu=True, save_visu=False, test_path=''
     # Validation data (running mean)
     vote_n = 0
     test_data = EasyDict()
+    preds = None
 
     # Start global loop
     while vote_n < cfg.test.max_votes:
 
         # Perform one peoch of test
         with torch.no_grad():
-            test_epoch_func(vote_n,
+            preds = test_epoch_func(vote_n,
                             net,
                             test_loader,
                             cfg,
@@ -144,7 +145,7 @@ def test_model(net, test_loader, cfg, on_gpu=True, save_visu=False, test_path=''
                             saving_path=new_test_path,
                             save_visu=save_visu)
 
-        
+
         if cfg.data.task == 'cloud_segmentation':
             # Create new sampling points for next test epoch
             t1 = time.time()
@@ -157,7 +158,7 @@ def test_model(net, test_loader, cfg, on_gpu=True, save_visu=False, test_path=''
 
         vote_n += 1
 
-    return
+    return preds
 
 
 
@@ -219,6 +220,8 @@ def cloud_segmentation_test(epoch, net, test_loader, cfg, test_data, device, sav
 
     t1 = time.time()
 
+    total_points = 0
+
     # Start validation loop
     for step, batch in enumerate(test_loader):
 
@@ -230,9 +233,9 @@ def cloud_segmentation_test(epoch, net, test_loader, cfg, test_data, device, sav
             continue
         empty_count = 0
 
-        for blengths in batch.in_dict.lengths:
-            if blengths.item() < 20:
-                print(' ' * 70, blengths.item())
+        #for blengths in batch.in_dict.lengths:
+            #if blengths.item() < 20:
+                #print(' ' * 70, blengths.item())
 
         # New time
         t = t[-1:]
@@ -249,6 +252,8 @@ def cloud_segmentation_test(epoch, net, test_loader, cfg, test_data, device, sav
 
         # Forward pass
         outputs = net(batch)
+        total_points += outputs.shape[0]
+
         
         if 'cuda' in device.type:
             torch.cuda.synchronize(device)
@@ -402,15 +407,18 @@ def cloud_segmentation_test(epoch, net, test_loader, cfg, test_data, device, sav
     # Get points
     all_preds = []
     for c_i, sub_preds in enumerate(all_sub_preds):
+        if cfg.data.init_sub_size != -1.0:
+            # Reproject preds on the evaluations points (only if there was subsampling)
+            preds = (sub_preds[test_loader.dataset.test_proj[c_i]]).astype(np.int32)
+        else:
+            preds = sub_preds.astype(np.int32)
 
-        # Reproject preds on the evaluations points
-        preds = (sub_preds[test_loader.dataset.test_proj[c_i]]).astype(np.int32)
         all_preds.append(preds)
+
 
     t4 = time.time()
     print('Done in {:.1f}s\n'.format(t4 - t3))
 
-        
 
     # Get scores on full clouds
     # *************************
@@ -422,7 +430,7 @@ def cloud_segmentation_test(epoch, net, test_loader, cfg, test_data, device, sav
         for c_i, preds in enumerate(all_preds):
 
             # Get groundtruth labels
-            labels = test_loader.dataset.val_labels[c_i].astype(np.int32)
+            labels = test_loader.dataset.val_labels[c_i].astype(np.int32) if cfg.data.init_sub_size != -1.0 else test_loader.dataset.input_labels[c_i].astype(np.int32)
 
             # Confusion matrix
             pred_values = np.array(cfg.data.pred_values, dtype=np.int32)
@@ -541,7 +549,7 @@ def cloud_segmentation_test(epoch, net, test_loader, cfg, test_data, device, sav
             np.savetxt(conf_path, full_conf, '%15d')
 
 
-    return
+    return all_preds
 
 
 
