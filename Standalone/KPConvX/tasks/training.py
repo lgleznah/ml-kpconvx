@@ -61,6 +61,8 @@ def training_epoch(epoch, t0, net, optimizer, training_loader, cfg, PID_file, de
 
     for batch in training_loader:
 
+        accum_loss = 0
+
         # Check kill signal (running_PID.txt deleted)
         if cfg.exp.saving and not exists(PID_file):
             raise ValueError('A user deleted the running_PID.txt file. Experiment is stopped.')
@@ -225,7 +227,6 @@ def training_epoch(epoch, t0, net, optimizer, training_loader, cfg, PID_file, de
                                                     t[-1] - t0))
                     
 
-                accum_loss = 0
                 step += 1
 
             mini_step += 1
@@ -253,7 +254,7 @@ def training_epoch(epoch, t0, net, optimizer, training_loader, cfg, PID_file, de
             else:
                 raise err
 
-    return finished
+    return accum_loss if finished else None
 
 
 def training_epoch_debug(epoch, net, optimizer, training_loader, cfg, PID_file, device, blim_inc=1000):
